@@ -1,0 +1,8 @@
+- name: LAMP_USING_CONDITIONS
+  hosts: target_server
+  remote_user: ansible
+  become: true
+  connection: ssh
+
+  roles:
+          - wordpress_migration

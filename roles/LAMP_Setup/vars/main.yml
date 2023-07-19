@@ -1,0 +1,4 @@
+---
+php_version: 7.4
+root_user: root
+mysql_pass: 123456

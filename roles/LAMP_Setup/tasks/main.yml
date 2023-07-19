@@ -1,0 +1,85 @@
+---
+- name: Update apt
+  apt:
+          update_cache: yes
+
+- name: Install Apache2
+  apt:
+          name: apache2
+          state: latest
+
+- name: Install software-properties-common
+  apt:
+          name: software-properties-common
+          state: present
+
+- name: Install php
+  apt:
+          name: "php{{ php_version }}"
+          state: present
+  with_items:
+          - add-apt-repository "ppa:ondrej/php"
+          - "php{{ php_version }}"
+          - "php{{ php_version }}-cli"
+          - "php{{ php_version }}-common"
+          - "php{{ php_version }}-curl"
+          - "php{{ php_version }}-gd"
+          - "php{{ php_version }}-json"
+          - "php{{ php_version }}-mbstring"
+          - "php{{ php_version }}-mysql"
+          - "php{{ php_version }}-opcache"
+          - "php{{ php_version }}-readline"
+          - "php{{ php_version }}-xml"
+          - "php{{ php_version }}-zip"
+          - "php{{ php_version }}-fpm"
+          - php-mysql
+  notify: restart apache2
+
+- name: Install mysql
+  apt:
+          name: mysql-server
+          state: present
+
+- name: Install php-fpm
+  apt:
+          name: "php{{ php_version }}-fpm"
+          state: present
+
+- name: Install MySQL Python package
+  apt:
+          name: python3-mysqldb
+          state: present
+
+- name: Allow bind address and port in mysql.cnf
+  lineinfile:
+        path: /etc/mysql/mysql.conf.d/mysqld.cnf 
+        regexp: "^bind-address"
+        line: "bind-address = 0.0.0.0" 
+        state: present
+  notify: Restart MySQL
+
+- name: Update root password
+  mysql_user:
+          user: root
+          login_password: '{{ mysql_pass }}'
+          login_unix_socket: /var/run/mysqld/mysqld.sock
+          host: 'localhost'
+          priv: "*.*:ALL,GRANT"
+          check_implicit_admin: true
+         
+- name: Remove anonymous MySQL users
+  mysql_user:
+          name: ''
+          host: localhost
+          state: absent
+          login_unix_socket: /var/run/mysqld/mysqld.sock
+          login_user: root
+          login_password: '{{ mysql_pass }}'
+
+
+- name: Reload MySQL privileges
+  mysql_db:
+          name: flush_privileges
+          login_unix_socket: /var/run/mysqld/mysqld.sock
+          login_user: root
+          login_password: '{{ mysql_pass }}'

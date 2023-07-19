@@ -1,0 +1,18 @@
+---
+source_server: 75.101.255.107
+target_wp_path: /home/ansible/wordpress/
+db_name: wordpress
+db_user: wpuser
+db_password: 123456
+old_url: http://52.91.7.159
+new_url: http://52.87.186.159
+php_version: 7.4
+source_wpcode_location: /home/ansible/wordpress
+target_wpcodecopy_location: /home/ansible/
+root_user: root
+user: ansible
+wp_prefix: wp_
+source_wpdb_location: "/home/ansible/wordpress-{{ ansible_date_time.date }}.sql"
+target_wpdbcopy_location: "/home/ansible/wordpress-{{ ansible_date_time.date }}.sql"
+apache_conf: wordpress.conf
+mysql_pass: 123456

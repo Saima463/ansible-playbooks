@@ -1,0 +1,193 @@
+---
+- name: Update apt
+  apt:
+          update_cache: yes
+
+- name: Install Apache2
+  apt:
+          name: apache2
+          state: latest
+
+- name: Install software-properties-common
+  apt:
+          name: software-properties-common
+          state: present
+
+- name: Install php
+  apt:
+          name: "php{{ php_version }}"
+          state: present
+  with_items:
+          - add-apt-repository "ppa:ondrej/php"
+          - "php{{ php_version }}"
+          - "php{{ php_version }}-cli"
+          - "php{{ php_version }}-common"
+          - "php{{ php_version }}-curl"
+          - "php{{ php_version }}-gd"
+          - "php{{ php_version }}-json"
+          - "php{{ php_version }}-mbstring"
+          - "php{{ php_version }}-mysql"
+          - "php{{ php_version }}-opcache"
+          - "php{{ php_version }}-readline"
+          - "php{{ php_version }}-xml"
+          - "php{{ php_version }}-zip"
+          - "php{{ php_version }}-fpm"
+          - php-mysql
+  notify: restart apache2
+
+- name: Install mysql
+  apt:
+          name: mysql-server
+          state: present
+
+- name: Install php-fpm
+  apt:
+          name: "php{{ php_version }}-fpm"
+          state: present
+
+- name: Install MySQL Python package
+  apt:
+          name: python3-mysqldb
+          state: present
+
+- name: Update root password
+  mysql_user:
+          user: root
+          login_password: '{{ mysql_pass }}'
+          login_unix_socket: /var/run/mysqld/mysqld.sock
+          host: 'localhost'
+          priv: "*.*:ALL,GRANT"
+          check_implicit_admin: true
+
+         
+- name: Remove anonymous MySQL users
+  mysql_user:
+          name: ''
+          host: "{{ item }}"
+          state: absent
+          login_unix_socket: /var/run/mysqld/mysqld.sock
+          login_user: "{{ root_user }}"
+          login_password: '{{ mysql_pass }}'
+  with_items:
+          - 127.0.0.1
+          - ::1
+          - localhost
+
+- name: Reload MySQL privileges
+  mysql_db:
+          name: flush_privileges
+          login_unix_socket: /var/run/mysqld/mysqld.sock
+          login_user:  "{{ root_user }}"
+          login_password: '{{ mysql_pass }}'
+
+- name: Enable MySQL extension in fpm/php.ini
+  lineinfile:
+          dest: /etc/php/{{ php_version }}/fpm/php.ini
+          regexp: ";extension=mysqli"
+          line: "extension=mysqli"
+          state: present
+  notify: restart php-fpm
+
+- name: Enable MySQL extension in cli/php.ini
+  lineinfile:
+          dest: /etc/php/{{ php_version }}/cli/php.ini 
+          regexp: ";extension=mysqli"
+          line: "extension=mysqli"
+          state: present
+  notify: restart php-fpm
+
+- name: Enable MySQL extension in apache2/php.ini
+  lineinfile:
+          dest: /etc/php/{{ php_version }}/apache2/php.ini
+          regexp: ";extension=mysqli"
+          line: "extension=mysqli"
+          state: present
+  notify: restart php-fpm
+
+
+- name: Copy WordPress files
+  command: rsync -azP -e "ssh -i /home/ansible/.ssh/id_rsa" "{{ user }}"@"{{ source_server }}":"{{ source_wpcode_location }}" "{{ target_wpcodecopy_location }}"
+  
+- name: Take database dump
+  become: true      
+  shell: mysqldump -u {{ root_user }} -p{{ db_password }} {{ db_name }} > {{ source_wpdb_location }}
+  delegate_to: "{{ source_server }}"
+
+- name: Copy WordPressDatabase Dump to Other Server
+  command: rsync -azP -e "ssh -i /home/ansible/.ssh/id_rsa" {{ user }}@{{ source_server }}:"{{ source_wpdb_location  | replace('%Y-%m-%d', ansible_date_time.date) }}"  "{{ target_wpdbcopy_location }}"
+
+- name: Create db user
+  mysql_user:
+         name: '{{ db_user }}'
+         password: "{{ db_password }}"
+         priv: '*.*:ALL,GRANT'
+         login_user: "{{ root_user }}"
+         login_password: "{{ db_password }}"
+         state: present
+
+- name: Create database
+  mysql_db:
+          name: "{{ db_name }}"
+          state: present
+
+- name: Import database dump on target server
+  shell: mysql -u {{root_user}} -p{{ db_password }} -proot "{{ db_name }}"  < "{{ target_wpdbcopy_location }}"
+
+- name: Update SiteURL
+  command: mysql -u {{ db_user }} -p{{ db_password }} -h localhost -P 3306 -D "{{ db_name }}" -e "UPDATE wp_options SET option_value = replace(option_value, '"{{ old_url }}"', '"{{ new_url }}"') WHERE option_name = 'home' OR option_name = 'siteurl';UPDATE wp_posts SET guid = replace(guid, '"{{ old_url }}"','"{{ new_url }}"');UPDATE wp_posts SET post_content = replace(post_content, '"{{ old_url }}"', '"{{ new_url }}"'); UPDATE wp_postmeta SET meta_value = replace(meta_value, '"{{ new_url }}"','"{{ new_url }}"')"
+
+- name: Configure WordPress database connection
+  lineinfile:
+          path: "{{ target_wp_path }}/wp-config.php"
+          line: |
+                  define( 'DB_NAME', '{{ db_name }}' );
+                  define( 'DB_USER', '{{ db_user }}' );
+                  define( 'DB_PASSWORD', '{{ db_password }}' );
+                  define( 'DB_HOST', 'localhost' );
+                  define( 'DB_CHARSET', 'utf8' );
+                  define( 'DB_COLLATE', '' );
+                  $table_prefix = '{{ wp_prefix }}';
+
+- name: Generate WordPress Salts
+  set_fact:
+          wp_salts: |
+                  {{ lookup('pipe', 'curl -L https://api.wordpress.org/secret-key/1.1/salt/') }}
+
+- name: Update wp-config.php with salts
+  lineinfile:
+          path: /home/ansible/wordpress/wp-config.php
+          regex: "{{ item.regex }}"
+          line: "{{ item.line }}"
+  loop:
+          - { regex: 'put your unique phrase here', line: "{{ wp_salts.split('\n')[0] }}" }
+          - { regex: 'put your unique phrase here', line: "{{ wp_salts.split('\n')[1] }}" }
+          - { regex: 'put your unique phrase here', line: "{{ wp_salts.split('\n')[2] }}" }
+          - { regex: 'put your unique phrase here', line: "{{ wp_salts.split('\n')[3] }}" }
+          - { regex: 'put your unique phrase here', line: "{{ wp_salts.split('\n')[4] }}" }
+          - { regex: 'put your unique phrase here', line: "{{ wp_salts.split('\n')[5] }}" }
+          - { regex: 'put your unique phrase here', line: "{{ wp_salts.split('\n')[6] }}" }
+          - { regex: 'put your unique phrase here', line: "{{ wp_salts.split('\n')[7] }}" }
+
+
+- name: Update Apache virtual host configuration
+  copy:
+          content: |
+                  <VirtualHost *:80>
+                  ServerAdmin admin@example.com
+                  ServerName "{{ source_server }}"
+                  ServerAlias "{{ alias }}"
+                  DocumentRoot "{{ target_wp_path }}"
+                  <Directory "{{ target_wp_path }}">
+                  Require all granted
+                  DirectoryIndex index.php
+                  AllowOverride FileInfo
+                  FallbackResource /index.php
+                  </Directory>
+                  ErrorLog ${APACHE_LOG_DIR}/error.log
+                  CustomLog ${APACHE_LOG_DIR}/access.log combined
+                  </VirtualHost>
+          dest: /etc/apache2/sites-available/{{apache_conf}}
+
+- name: Enable Apache virtual host
+  command: a2ensite wordpress.conf
+  notify: restart apache2

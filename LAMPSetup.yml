@@ -1,0 +1,10 @@
+- name: LAMP_USING_CONDITIONS
+  hosts: target_server
+  remote_user: ansible
+  become: true
+  connection: ssh
+
+  roles:
+          - LAMP_Setup
+
+
